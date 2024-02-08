@@ -1,6 +1,7 @@
 (ns clojox.core
   (:gen-class)
-  (:import [jlox Lox]))
+  (:require [clojox.parser :refer [parser]]) 
+  (:import [jlox Lox Scanner]))
 
 (defn -main
   [& args]
@@ -9,3 +10,9 @@
                            (System/exit 64))
     (= (count args) 1) (Lox/runFile (first args))
     :else (Lox/runREPL)))
+
+(defn run
+  [source]
+  (let [scanner (Scanner. source)
+        tokens (.scanTokens scanner)]
+    (parser tokens)))
