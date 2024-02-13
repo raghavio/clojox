@@ -117,7 +117,7 @@ public class Scanner {
                     current += 1;
                     addToken(GREATER_EQUAL);
                 } else {
-                    addToken(EQUAL);
+                    addToken(GREATER);
                 }
                 break;
             case '/':

@@ -76,7 +76,7 @@
   [tokens]
   (equality tokens))
 
-(defn parser
+(defn parse
   "Returns the ast for the specified tokens."
   [tokens]
   (try

@@ -12,12 +12,15 @@ import java.util.List;
 
 public class Lox {
     public static boolean hadError = false;
+    public static boolean hadRuntimeError = false;
 
     public static void runFile(String path) throws IOException {
         var bytes = Files.readAllBytes(Paths.get(path));
         run(new String(bytes, Charset.defaultCharset()));
         if (hadError)
             System.exit(65);
+        if (hadRuntimeError)
+            System.exit(70);
     }
 
     public static void runREPL() throws IOException {

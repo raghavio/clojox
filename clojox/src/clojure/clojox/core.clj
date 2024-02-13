@@ -1,6 +1,7 @@
 (ns clojox.core
   (:gen-class)
-  (:require [clojox.parser :refer [parser]]) 
+  (:require [clojox.interpreter :refer [interpret]]
+            [clojox.parser :refer [parse]])
   (:import [jlox Lox Scanner]))
 
 (defn -main
@@ -14,5 +15,6 @@
 (defn run
   [source]
   (let [scanner (Scanner. source)
-        tokens (.scanTokens scanner)]
-    (parser tokens)))
+        tokens (.scanTokens scanner)
+        ast (parse tokens)]
+    (interpret ast)))
