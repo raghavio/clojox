@@ -1,8 +1,8 @@
 (ns clojox.interpreter
-  (:require [clojox.utils :as utils]
+  (:require [clojox.environment :as environment]
+            [clojox.utils :as utils]
             [clojure.string :as str])
   (:import [jlox TokenType]))
-
 
 (defn- stringify
   "Convert the intepreted output to string. Remove '.0' from number."
@@ -32,44 +32,79 @@
                     {:token operator})))
   (apply operator-fn operands))
 
-(defmulti evaluate :type)
+(defmulti evaluate (fn [ast _env] (:type ast)))
 
 (defmethod evaluate :literal
-  [{:keys [value]}]
-  value)
+  [{:keys [value]}, env]
+  [value env])
 
 (defmethod evaluate :grouping
-  [{:keys [value]}]
-  (evaluate value))
+  [{:keys [value]} env]
+  (evaluate value env))
 
 (defmethod evaluate :unary
-  [{:keys [op right]}]
-  (let [right* (evaluate right)]
-    (condp = (.type op)
-      TokenType/MINUS (- (double right*))
-      TokenType/BANG (not right*))))
+  [{:keys [op right]} env]
+  (let [[right* env] (evaluate right env)
+        result (condp = (.type op)
+                 TokenType/MINUS (- (double right*))
+                 TokenType/BANG (not right*))]
+    [result env]))
 
 (defmethod evaluate :binary
-  [{:keys [left op right]}]
-  (let [left* (evaluate left)
-        right* (evaluate right)]
-    (case (.name (.type op)) ;; case doesn't work with java enums. Using the .name thing .
-      "MINUS" (assert-number op - left* right*)
-      "SLASH" (assert-number op / left* right*)
-      "STAR" (assert-number op * left* right*)
-      "PLUS" (handle-plus left* right*)
-      "GREATER" (assert-number op > left* right*)
-      "GREATER_EQUAL" (assert-number op >= left* right*)
-      "LESS" (assert-number op < left* right*)
-      "LESS_EQUAL" (assert-number op <= left* right*)
-      "BANG_EQUAL" (not= left* right*)
-      "EQUAL_EQUAL" (= left* right*))))
+  [{:keys [left op right]} env]
+  (let [[left* env] (evaluate left env)
+        [right* env] (evaluate right env)]
+    [(case (.name (.type op)) ;; case doesn't work with java enums. Using the .name thing .
+       "MINUS" (assert-number op - left* right*)
+       "SLASH" (assert-number op / left* right*)
+       "STAR" (assert-number op * left* right*)
+       "PLUS" (handle-plus left* right*)
+       "GREATER" (assert-number op > left* right*)
+       "GREATER_EQUAL" (assert-number op >= left* right*)
+       "LESS" (assert-number op < left* right*)
+       "LESS_EQUAL" (assert-number op <= left* right*)
+       "BANG_EQUAL" (not= left* right*)
+       "EQUAL_EQUAL" (= left* right*))
+     env]))
+
+(defmethod evaluate :print
+  [{:keys [expression]} env]
+  (println (stringify (first (evaluate expression env))))
+  [nil env])
+
+(defmethod evaluate :var-stmt
+  [{:keys [identifier initializer]} env]
+  (let [evaluated-stmt (when initializer
+                         (first (evaluate initializer env)))]
+    [nil (environment/define env identifier evaluated-stmt)]))
+
+(defmethod evaluate :variable
+  [{:keys [identifier]} env]
+  [(environment/lookup env identifier) env])
+
+(defmethod evaluate :assign
+  [{:keys [identifier value]} env]
+  (let [[value* env] (evaluate value env)]
+    [value* (environment/assign env identifier value*)]))
+
+(defmethod evaluate :block
+  [{:keys [statements]} env]
+  (loop [statements statements
+         env (environment/create env)]
+    (if (empty? statements)
+      [nil (:parent env)]
+      (let [[_evaluated-expr env] (evaluate (first statements) env)]
+        (recur (rest statements) env)))))
 
 (defn interpret
-  [expr]
-  (try
-    (let [evaluated-expr (evaluate expr)]
-      (stringify evaluated-expr))
-    (catch RuntimeException e
-      (when-let [data (ex-data e)]
-        (utils/runtime-error (ex-message e) (.line (:token data)))))))
+  [statements]
+  (loop [statements statements
+         env (environment/create nil {})]
+    (if (empty? statements)
+      nil
+      (let [[_evaluated-expr env] (try
+                                    (evaluate (first statements) env)
+                                    (catch RuntimeException e
+                                      (when-let [data (ex-data e)]
+                                        (utils/runtime-error (ex-message e) (.line (:token data))))))]
+        (recur (rest statements) env)))))
