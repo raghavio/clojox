@@ -96,6 +96,33 @@
       (let [[_evaluated-expr env] (evaluate (first statements) env)]
         (recur (rest statements) env)))))
 
+(defmethod evaluate :if
+  [{:keys [condition then else]} env]
+  (let [[result env] (evaluate condition env)]
+    (cond
+      result (evaluate then env)
+      else (evaluate else env)))
+  [nil env])
+
+(defmethod evaluate :logical
+  [{:keys [left op right]} env]
+  (let [[left* env] (evaluate left env)]
+    (if (= (.type op) TokenType/OR)
+      (if left* ;; For OR, if left is true, return that else evaluate right expr.
+        [left* env]
+        (evaluate right env))
+      (if left* ;; For AND, if left is true, evaluate right else return left.
+        (evaluate right env)
+        [left* env]))))
+
+(defmethod evaluate :while
+  [{:keys [condition body]} env]
+  (loop [[condition* env] (evaluate condition env)]
+    (if condition*
+      (let [[_ env] (evaluate body env)]
+        (recur (evaluate condition env)))
+      [nil env])))
+
 (defn interpret
   [statements]
   (loop [statements statements
