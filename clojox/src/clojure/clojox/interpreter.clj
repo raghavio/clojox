@@ -1,7 +1,10 @@
 (ns clojox.interpreter
   (:require [clojox.environment :as environment]
             [clojox.utils :as utils]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [clojox.callable :as callable :refer [ClojoxCallable]]
+            [clojox.function :refer [->Function]]
+            [clojox.evaluate :refer [evaluate]])
   (:import [jlox TokenType]))
 
 (defn- stringify
@@ -13,6 +16,7 @@
                                (if (str/ends-with? s ".0")
                                  (apply str (drop-last 2 s))
                                  s))
+    (satisfies? ClojoxCallable evaluated-expr) (callable/to-string evaluated-expr)
     :else (str evaluated-expr)))
 
 (defn- handle-plus
@@ -31,8 +35,6 @@
     (throw (ex-info (str (if (second operands) "Operands" "Operand") " must be a number.")
                     {:token operator})))
   (apply operator-fn operands))
-
-(defmulti evaluate (fn [ast _env] (:type ast)))
 
 (defmethod evaluate :literal
   [{:keys [value]}, env]
@@ -69,8 +71,9 @@
 
 (defmethod evaluate :print
   [{:keys [expression]} env]
-  (println (stringify (first (evaluate expression env))))
-  [nil env])
+  (let [[value env] (evaluate expression env)]
+    (println (stringify value))
+    [nil env]))
 
 (defmethod evaluate :var-stmt
   [{:keys [identifier initializer]} env]
@@ -84,15 +87,21 @@
 
 (defmethod evaluate :assign
   [{:keys [identifier value]} env]
-  (let [[value* env] (evaluate value env)]
-    [value* (environment/assign env identifier value*)]))
+  (let [[value* env] (evaluate value env)
+        updated-env (environment/assign env identifier value*)
+        updated-env (if (contains? env :calling-env)
+                      (assoc updated-env :calling-env (environment/assign (:calling-env env) identifier value*))
+                      updated-env)]
+    [value* updated-env]))
 
 (defmethod evaluate :block
-  [{:keys [statements]} env]
+  [{:keys [statements calling-env]} env]
   (loop [statements statements
-         env (environment/create env)]
+         env (if calling-env
+               (assoc (environment/create env) :calling-env calling-env)
+               (environment/create env))]
     (if (empty? statements)
-      [nil (:parent env)]
+      [nil (assoc (:parent env) :calling-env (:calling-env env))]
       (let [[_evaluated-expr env] (evaluate (first statements) env)]
         (recur (rest statements) env)))))
 
@@ -123,6 +132,39 @@
         (recur (evaluate condition env)))
       [nil env])))
 
+(defmethod evaluate :call
+  [{:keys [callee paren arguments]} env]
+  (let [[callee* env] (evaluate callee env) ;; callee is a var that binds to a ClojoxCallable object
+        args-val (->> arguments ;; The env from one eval should get passed to next.
+                      (reduce (fn [[args-val env] arg-ast]
+                                  (let [[arg-val env] (evaluate arg-ast env)]
+                                    [(conj args-val arg-val) env])) [[] env])
+                      first)
+        func-name-identifier (:identifier callee)
+        args-count (count arguments)]
+    (when-not (satisfies? ClojoxCallable callee*)
+      (throw (ex-info "Can only call functions and classes." {:token paren})))
+
+    (when (not= (callable/arity callee*) args-count)
+      (throw (ex-info
+              (format "Expected %d arguments but got %d" (callable/arity callee*)
+                      args-count)
+              {:token paren})))
+    (let [[x env_] (callable/call callee* func-name-identifier args-val env)]
+      [x env_])))
+
+(defmethod evaluate :function
+  [{:keys [identifier] :as fn-ast} env]
+  (let [fn-record (->Function fn-ast env)]
+    [nil (environment/define env identifier fn-record)]))
+
+(defmethod evaluate :return
+  [{:keys [expr]} env]
+  (let [[return-value env] (when expr
+                         (evaluate expr env))]
+    (throw
+     (ex-info nil {:return-value return-value :env env  }))))
+
 (defn interpret
   [statements]
   (loop [statements statements
@@ -131,7 +173,7 @@
       nil
       (let [[_evaluated-expr env] (try
                                     (evaluate (first statements) env)
-                                    (catch RuntimeException e
+                                    #_(catch RuntimeException e
                                       (when-let [data (ex-data e)]
                                         (utils/runtime-error (ex-message e) (.line (:token data))))))]
         (recur (rest statements) env)))))
