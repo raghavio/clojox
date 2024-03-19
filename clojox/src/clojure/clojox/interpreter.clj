@@ -21,18 +21,20 @@
 
 (defn- handle-plus
   "If it's a number, it should do summation, if it's a string it should concat them."
-  [left right]
+  [left right operator]
   (cond
     (and (number? left) (number? right)) (+ left right)
     (and (string? left) (string? right)) (str left right)
-    :else
-    nil))
+    :else (throw (ex-info "Operands must be two numbers or two strings." {:token operator}))))
 
 (defn- assert-number
   "Throws exception if operands aren't numbers."
   [operator operator-fn & operands]
   (when (not-every? number? operands)
-    (throw (ex-info (str (if (second operands) "Operands" "Operand") " must be a number.")
+    (throw (ex-info (str (if (second operands) "Operands" "Operand")
+                         " must be "
+                         (if (second operands) "numbers" "a number")
+                         ".")
                     {:token operator})))
   (apply operator-fn operands))
 
@@ -48,7 +50,7 @@
   [{:keys [op right]} env]
   (let [[right* env] (evaluate right env)
         result (condp = (.type op)
-                 TokenType/MINUS (- (double right*))
+                 TokenType/MINUS (assert-number op - right*)
                  TokenType/BANG (not right*))]
     [result env]))
 
@@ -60,7 +62,7 @@
        "MINUS" (assert-number op - left* right*)
        "SLASH" (assert-number op / left* right*)
        "STAR" (assert-number op * left* right*)
-       "PLUS" (handle-plus left* right*)
+       "PLUS" (handle-plus left* right* op)
        "GREATER" (assert-number op > left* right*)
        "GREATER_EQUAL" (assert-number op >= left* right*)
        "LESS" (assert-number op < left* right*)
@@ -77,8 +79,9 @@
 
 (defmethod evaluate :var-stmt
   [{:keys [identifier initializer]} env]
-  (let [evaluated-stmt (when initializer
-                         (first (evaluate initializer env)))]
+  (let [[evaluated-stmt env] (if initializer
+                               (evaluate initializer env)
+                               [nil env])]
     [nil (environment/define env identifier evaluated-stmt)]))
 
 (defmethod evaluate :variable
@@ -89,7 +92,7 @@
   [{:keys [identifier value]} env]
   (let [[value* env] (evaluate value env)
         updated-env (environment/assign env identifier value*)
-        updated-env (if (contains? env :calling-env)
+        updated-env (if false #_(contains? env :calling-env)
                       (assoc updated-env :calling-env (environment/assign (:calling-env env) identifier value*))
                       updated-env)]
     [value* updated-env]))
@@ -107,11 +110,11 @@
 
 (defmethod evaluate :if
   [{:keys [condition then else]} env]
-  (let [[result env] (evaluate condition env)]
-    (cond
-      result (evaluate then env)
-      else (evaluate else env)))
-  [nil env])
+  (let [[result env] (evaluate condition env)
+        [_ env] (cond
+                  result (evaluate then env)
+                  else (evaluate else env))]
+    [nil env]))
 
 (defmethod evaluate :logical
   [{:keys [left op right]} env]
@@ -167,13 +170,14 @@
 
 (defn interpret
   [statements]
-  (loop [statements statements
-         env (environment/create nil {})]
-    (if (empty? statements)
-      nil
-      (let [[_evaluated-expr env] (try
-                                    (evaluate (first statements) env)
-                                    #_(catch RuntimeException e
-                                      (when-let [data (ex-data e)]
-                                        (utils/runtime-error (ex-message e) (.line (:token data))))))]
-        (recur (rest statements) env)))))
+  (try
+    (loop [statements statements
+           env (environment/create nil {})]
+      (if (empty? statements)
+        nil
+        (let [[_evaluated-expr env] (evaluate (first statements) env)]
+          (recur (rest statements) env))))
+    (catch clojure.lang.ExceptionInfo e
+      (utils/error (ex-message e) (.line (:token (ex-data e))))
+      70 ;; Exit code for runtime error.
+      )))

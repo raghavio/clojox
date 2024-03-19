@@ -9,8 +9,9 @@
 (defn lookup
   [env identifier]
   (if env
-    (or (get-in env [:bindings (.lexeme identifier)])
-        (recur (:parent env) identifier))
+    (if (contains? (:bindings env) (.lexeme identifier))
+      (get-in env [:bindings (.lexeme identifier)])
+      (recur (:parent env) identifier))
     (throw (ex-info (str "Undefined variable '" (.lexeme identifier) "'.") {:token identifier}))))
 
 (defn define
@@ -25,5 +26,4 @@
       (if-let [parent-env (assign (:parent env) identifier val)]
         (assoc env :parent parent-env)
         nil)
-      env
-      #_(throw (ex-info (str "Undefined variable '" (.lexeme identifier) "'.") {:token identifier})))))
+      (throw (ex-info (str "Undefined variable '" (.lexeme identifier) "'.") {:token identifier})))))

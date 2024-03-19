@@ -48,7 +48,7 @@ public class Scanner {
 
     /**
      * Checks if the source has any characters left to scan or not
-     * 
+     *
      * @return
      */
     private boolean hasCharacters() {
@@ -189,7 +189,7 @@ public class Scanner {
         }
 
         if (!hasCharacters()) {
-            Lox.error(line, "Unterminated string. Missing '\"'");
+            Lox.error(line, "Unterminated string.");
             return;
         }
 
