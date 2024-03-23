@@ -2,6 +2,6 @@
 
 (defprotocol ClojoxCallable
   "A protocol to implement callable items like functions and classes."
-  (call [this func-name-identifier arguments calling-env])
+  (call [this arguments])
   (arity [this])
   (to-string [this]))

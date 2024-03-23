@@ -9,9 +9,8 @@
   [source]
   (let [scanner (Scanner. source)
         tokens (.scanTokens scanner)
-        scanner-error-code (when (Lox/hadError) 65) ;; If any error in scanner.
-        [ast parse-error-code] (parse tokens)
-        error-code (or scanner-error-code parse-error-code)
+        ast (parse tokens)
+        error-code (when (Lox/hadError) 65)
         error-code (if-not error-code
                      (interpret ast)
                      error-code)]
@@ -33,3 +32,7 @@
                            (System/exit 64))
     (= (count args) 1) (run-file (first args))
     :else (Lox/runREPL)))
+
+(defn reset-error-flag!
+  []
+  (set! (. Lox hadError) false))

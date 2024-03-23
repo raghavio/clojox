@@ -4,4 +4,4 @@
 (defn error
   [message line]
   (binding [*out* *err*]
-    (println (str message " [line " line "]"))))
+    (println (str message "\n[line " line "]"))))

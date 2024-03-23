@@ -4,7 +4,8 @@
             [clojure.string :as str]
             [clojox.callable :as callable :refer [ClojoxCallable]]
             [clojox.function :refer [->Function]]
-            [clojox.evaluate :refer [evaluate]])
+            [clojox.evaluate :refer [evaluate]]
+            [clojox.native-functions :as native-functions])
   (:import [jlox TokenType]))
 
 (defn- stringify
@@ -91,21 +92,18 @@
 (defmethod evaluate :assign
   [{:keys [identifier value]} env]
   (let [[value* env] (evaluate value env)
-        updated-env (environment/assign env identifier value*)
-        updated-env (if false #_(contains? env :calling-env)
-                      (assoc updated-env :calling-env (environment/assign (:calling-env env) identifier value*))
-                      updated-env)]
+        updated-env (environment/assign env identifier value*)]
     [value* updated-env]))
 
 (defmethod evaluate :block
-  [{:keys [statements calling-env]} env]
+  [{:keys [statements]} env]
   (loop [statements statements
-         env (if calling-env
-               (assoc (environment/create env) :calling-env calling-env)
-               (environment/create env))]
+         env (environment/create env)]
+;;    (println "Env: " env)
     (if (empty? statements)
-      [nil (assoc (:parent env) :calling-env (:calling-env env))]
+      [nil (:parent env)]
       (let [[_evaluated-expr env] (evaluate (first statements) env)]
+
         (recur (rest statements) env)))))
 
 (defmethod evaluate :if
@@ -113,7 +111,8 @@
   (let [[result env] (evaluate condition env)
         [_ env] (cond
                   result (evaluate then env)
-                  else (evaluate else env))]
+                  else (evaluate else env)
+                  :else [nil env])]
     [nil env]))
 
 (defmethod evaluate :logical
@@ -140,42 +139,46 @@
   (let [[callee* env] (evaluate callee env) ;; callee is a var that binds to a ClojoxCallable object
         args-val (->> arguments ;; The env from one eval should get passed to next.
                       (reduce (fn [[args-val env] arg-ast]
-                                  (let [[arg-val env] (evaluate arg-ast env)]
-                                    [(conj args-val arg-val) env])) [[] env])
+                                (let [[arg-val env] (evaluate arg-ast env)]
+                                  [(conj args-val arg-val) env])) [[] env])
                       first)
-        func-name-identifier (:identifier callee)
         args-count (count arguments)]
     (when-not (satisfies? ClojoxCallable callee*)
       (throw (ex-info "Can only call functions and classes." {:token paren})))
 
     (when (not= (callable/arity callee*) args-count)
       (throw (ex-info
-              (format "Expected %d arguments but got %d" (callable/arity callee*)
+              (format "Expected %d arguments but got %d." (callable/arity callee*)
                       args-count)
               {:token paren})))
-    (let [[x env_] (callable/call callee* func-name-identifier args-val env)]
-      [x env_])))
+    (let [return-value (callable/call callee* args-val)]
+      [return-value env])))
 
 (defmethod evaluate :function
   [{:keys [identifier] :as fn-ast} env]
-  (let [fn-record (->Function fn-ast env)]
-    [nil (environment/define env identifier fn-record)]))
+  ;; Function's env should contain itself for recursion to work.
+  ;; To achieve that, we declare an unassigned var. Use the env at this point
+  ;; and then reassign the function's name with record.
+  (let [env (environment/define env identifier nil)
+        fn-record (->Function fn-ast env)]
+    [nil (environment/assign env identifier fn-record)]))
 
 (defmethod evaluate :return
   [{:keys [expr]} env]
   (let [[return-value env] (when expr
-                         (evaluate expr env))]
+                             (evaluate expr env))]
     (throw
-     (ex-info nil {:return-value return-value :env env  }))))
+     (ex-info nil {:return-value return-value :env env}))))
 
 (defn interpret
   [statements]
   (try
     (loop [statements statements
-           env (environment/create nil {})]
+           env (environment/create nil {"clock" (atom native-functions/clock)})]
       (if (empty? statements)
         nil
         (let [[_evaluated-expr env] (evaluate (first statements) env)]
+          #_(println "Env: " env)
           (recur (rest statements) env))))
     (catch clojure.lang.ExceptionInfo e
       (utils/error (ex-message e) (.line (:token (ex-data e))))
