@@ -2,11 +2,13 @@
   (:require [clojox.environment :as environment]
             [clojox.utils :as utils]
             [clojure.string :as str]
-            [clojox.callable :as callable :refer [ClojoxCallable]]
+            [clojox.protocols :as protocols :refer [evaluate]]
+
             [clojox.function :refer [->Function]]
-            [clojox.evaluate :refer [evaluate]]
-            [clojox.native-functions :as native-functions])
-  (:import [jlox TokenType Return]))
+            [clojox.native-functions :as native-functions]
+            )
+  (:import [jlox TokenType ReturnException]))
+
 
 (defn- stringify
   "Convert the intepreted output to string. Remove '.0' from number."
@@ -17,7 +19,7 @@
                                (if (str/ends-with? s ".0")
                                  (apply str (drop-last 2 s))
                                  s))
-    (satisfies? ClojoxCallable evaluated-expr) (callable/to-string evaluated-expr)
+    (satisfies? protocols/ClojoxCallable evaluated-expr) (protocols/to-string evaluated-expr)
     :else (str evaluated-expr)))
 
 (defn- handle-plus
@@ -39,129 +41,143 @@
                     {:token operator})))
   (apply operator-fn operands))
 
-(defmethod evaluate :literal
-  [{:keys [value]}, env]
-  [value env])
+(defrecord Literal [value]
+  protocols/Evaluate
+  (evaluate [_ env]
+    [value env]))
 
-(defmethod evaluate :grouping
-  [{:keys [value]} env]
-  (evaluate value env))
+(defrecord Grouping [value]
+  protocols/Evaluate
+  (evaluate [_ env]
+    (evaluate value env)))
 
-(defmethod evaluate :unary
-  [{:keys [op right]} env]
-  (let [[right* env] (evaluate right env)
-        result (condp = (.type op)
-                 TokenType/MINUS (assert-number op - right*)
-                 TokenType/BANG (not right*))]
-    [result env]))
+(defrecord Unary [op right]
+  protocols/Evaluate
+  (evaluate [_ env]
+    (let [[right* env] (evaluate right env)
+          result (condp = (.type op)
+                   TokenType/MINUS (assert-number op - right*)
+                   TokenType/BANG (not right*))]
+      [result env])))
 
-(defmethod evaluate :binary
-  [{:keys [left op right]} env]
-  (let [[left* env] (evaluate left env)
-        [right* env] (evaluate right env)]
-    [(case (.name (.type op)) ;; case doesn't work with java enums. Using the .name thing .
-       "MINUS" (assert-number op - left* right*)
-       "SLASH" (assert-number op / left* right*)
-       "STAR" (assert-number op * left* right*)
-       "PLUS" (handle-plus left* right* op)
-       "GREATER" (assert-number op > left* right*)
-       "GREATER_EQUAL" (assert-number op >= left* right*)
-       "LESS" (assert-number op < left* right*)
-       "LESS_EQUAL" (assert-number op <= left* right*)
-       "BANG_EQUAL" (not= left* right*)
-       "EQUAL_EQUAL" (= left* right*))
-     env]))
+(defrecord Binary [left op right]
+  protocols/Evaluate
+  (evaluate [_ env]
+    (let [[left* env] (evaluate left env)
+          [right* env] (evaluate right env)]
+      [(case (.name (.type op))
+         "MINUS" (assert-number op - left* right*)
+         "SLASH" (assert-number op / left* right*)
+         "STAR" (assert-number op * left* right*)
+         "PLUS" (handle-plus left* right* op)
+         "GREATER" (assert-number op > left* right*)
+         "GREATER_EQUAL" (assert-number op >= left* right*)
+         "LESS" (assert-number op < left* right*)
+         "LESS_EQUAL" (assert-number op <= left* right*)
+         "BANG_EQUAL" (not= left* right*)
+         "EQUAL_EQUAL" (= left* right*))
+       env])))
 
-(defmethod evaluate :print
-  [{:keys [expression]} env]
-  (let [[value env] (evaluate expression env)]
-    (println (stringify value))
-    [nil env]))
-
-(defmethod evaluate :var-stmt
-  [{:keys [identifier initializer]} env]
-  (let [[evaluated-stmt env] (if initializer
-                               (evaluate initializer env)
-                               [nil env])]
-    [nil (environment/define env identifier evaluated-stmt)]))
-
-(defmethod evaluate :variable
-  [{:keys [identifier]} env]
-  [(environment/lookup env identifier) env])
-
-(defmethod evaluate :assign
-  [{:keys [identifier value]} env]
-  (let [[value* env] (evaluate value env)
-        updated-env (environment/assign env identifier value*)]
-    [value* updated-env]))
-
-(defmethod evaluate :block
-  [{:keys [statements]} env]
-  (loop [statements statements
-         env (environment/create env)]
-    (if (empty? statements)
-      [nil (:parent env)]
-      (let [[_evaluated-expr env] (evaluate (first statements) env)]
-
-        (recur (rest statements) env)))))
-
-(defmethod evaluate :if
-  [{:keys [condition then else]} env]
-  (let [[result env] (evaluate condition env)
-        [_ env] (cond
-                  result (evaluate then env)
-                  else (evaluate else env)
-                  :else [nil env])]
-    [nil env]))
-
-(defmethod evaluate :logical
-  [{:keys [left op right]} env]
-  (let [[left* env] (evaluate left env)]
-    (if (= (.type op) TokenType/OR)
-      (if left* ;; For OR, if left is true, return that else evaluate right expr.
-        [left* env]
-        (evaluate right env))
-      (if left* ;; For AND, if left is true, evaluate right else return left.
-        (evaluate right env)
-        [left* env]))))
-
-(defmethod evaluate :while
-  [{:keys [condition body]} env]
-  (loop [[condition* env] (evaluate condition env)]
-    (if condition*
-      (let [[_ env] (evaluate body env)]
-        (recur (evaluate condition env)))
+(defrecord Print [expression]
+  protocols/Evaluate
+  (evaluate [_ env]
+    (let [[value env] (evaluate expression env)]
+      (println (stringify value))
       [nil env])))
 
-(defmethod evaluate :call
-  [{:keys [callee paren arguments]} env]
-  (let [[callee* env] (evaluate callee env) ;; callee is a var that binds to a ClojoxCallable object
-        args-val (->> arguments ;; The env from one eval should get passed to next.
-                      (reduce (fn [[args-val env] arg-ast]
-                                (let [[arg-val env] (evaluate arg-ast env)]
-                                  [(conj args-val arg-val) env])) [[] env])
-                      first)
-        args-count (count arguments)]
-    (when-not (satisfies? ClojoxCallable callee*)
-      (throw (ex-info "Can only call functions and classes." {:token paren})))
+(defrecord VarStmt [identifier initializer]
+  protocols/Evaluate
+  (evaluate [_ env]
+    (let [[evaluated-stmt env] (if initializer
+                                 (evaluate initializer env)
+                                 [nil env])]
+      [nil (environment/define env identifier evaluated-stmt)])))
 
-    (when (not= (callable/arity callee*) args-count)
-      (throw (ex-info
-              (format "Expected %d arguments but got %d." (callable/arity callee*)
-                      args-count)
-              {:token paren})))
-    (let [return-value (callable/call callee* args-val)]
-      [return-value env])))
+(defrecord Variable [identifier]
+  protocols/Evaluate
+  (evaluate [_ env]
+    [(environment/lookup env identifier) env]))
 
-(defmethod evaluate :function
-  [{:keys [identifier] :as fn-ast} env]
-  [nil (environment/define env identifier (->Function fn-ast env))])
+(defrecord Assign [identifier value]
+  protocols/Evaluate
+  (evaluate [_ env]
+    (let [[value* env] (evaluate value env)
+          updated-env (environment/assign env identifier value*)]
+      [value* updated-env])))
 
-(defmethod evaluate :return
-  [{:keys [expr]} env]
-  (let [[return-value env] (when expr
-                             (evaluate expr env))]
-    (throw (Return. return-value))))
+(defrecord Block [statements]
+  protocols/Evaluate
+  (evaluate [_ env]
+    (loop [statements statements
+           env (environment/create env)]
+      (if (empty? statements)
+        [nil (:parent env)]
+        (let [[_evaluated-expr env] (evaluate (first statements) env)]
+          (recur (rest statements) env))))))
+
+(defrecord If [condition then else]
+  protocols/Evaluate
+  (evaluate [_ env]
+    (let [[result env] (evaluate condition env)
+          [_ env] (cond
+                    result (evaluate then env)
+                    else (evaluate else env)
+                    :else [nil env])]
+      [nil env])))
+
+(defrecord Logical [left op right]
+  protocols/Evaluate
+  (evaluate [_ env]
+    (let [[left* env] (evaluate left env)]
+      (if (= (.type op) TokenType/OR)
+        (if left* ;; For OR, if left is true, return that else evaluate right expr.
+          [left* env]
+          (evaluate right env))
+        (if left* ;; For AND, if left is true, evaluate right else return left.
+          (evaluate right env)
+          [left* env])))))
+
+(defrecord While [condition body]
+  protocols/Evaluate
+  (evaluate [_ env]
+    (loop [[condition* env] (evaluate condition env)]
+      (if condition*
+        (let [[_ env] (evaluate body env)]
+          (recur (evaluate condition env)))
+        [nil env]))))
+
+(defrecord Call [callee paren arguments]
+  protocols/Evaluate
+  (evaluate [_ env]
+    (let [[callee* env] (evaluate callee env)
+          args-val (->> arguments
+                        (reduce (fn [[args-val env] arg-ast]
+                                  (let [[arg-val env] (evaluate arg-ast env)]
+                                    [(conj args-val arg-val) env])) [[] env])
+                        first)
+          args-count (count arguments)]
+      (when-not (satisfies? protocols/ClojoxCallable callee*)
+        (throw (ex-info "Can only call functions and classes." {:token paren})))
+
+      (when (not= (protocols/arity callee*) args-count)
+        (throw (ex-info
+                (format "Expected %d arguments but got %d." (protocols/arity callee*)
+                        args-count)
+                {:token paren})))
+      (let [return-value (protocols/call callee* args-val)]
+        [return-value env]))))
+
+(defrecord Fun [identifier params body]
+  protocols/Evaluate
+  (evaluate [_ env]
+    [nil (environment/define env identifier (->Function identifier params body env))]))
+
+(defrecord Return [_keyword expr]
+  protocols/Evaluate
+  (evaluate [_ env]
+    (let [[return-value _env] (when expr
+                               (evaluate expr env))]
+      (throw (ReturnException. return-value)))))
 
 (defn interpret
   [statements]

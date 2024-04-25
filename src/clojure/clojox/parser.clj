@@ -1,5 +1,9 @@
 (ns clojox.parser
-  (:import [jlox TokenType Lox]))
+  (:require [clojox.interpreter :refer [->Grouping ->Literal ->Unary ->Binary ->Print
+                                        ->VarStmt ->Variable ->Assign ->Block ->If
+                                        ->Logical ->While ->Call ->Fun ->Return]])
+  (:import [jlox TokenType Lox]
+           [clojox.interpreter Variable]))
 
 (declare statement declaration expression)
 
@@ -39,20 +43,20 @@
   (let [[[token & remaining :as tokens] group-expr] (expression tokens)]
     (when-not (match? token TokenType/RIGHT_PAREN)
       (throw-error tokens "Expect ')' after expression."))
-    [remaining {:type :grouping :value group-expr}]))
+    [remaining (->Grouping group-expr)]))
 
 (defn- literal-ast
   [[token & remaining-tokens]]
   (let [val-lookup {TokenType/FALSE false TokenType/TRUE true TokenType/NIL nil}
         value (get val-lookup (.type token) (.literal token))]
-    [remaining-tokens {:type :literal :value value}]))
+    [remaining-tokens (->Literal value)]))
 
 (defn- primary
   [[token & remaining :as tokens]]
   (cond
     (match? token TokenType/FALSE TokenType/TRUE TokenType/NIL TokenType/NUMBER TokenType/STRING) (literal-ast tokens)
     (match? token TokenType/LEFT_PAREN) (grouping-ast remaining)
-    (match? token TokenType/IDENTIFIER) [remaining {:type :variable :identifier token}]
+    (match? token TokenType/IDENTIFIER) [remaining (->Variable token)]
     :else (throw-error tokens "Expect expression.")))
 
 (defn- left-right-ast
@@ -61,19 +65,19 @@
     (if (apply match? next-token operand-types) ;; Recursively check if the next token(s) match the operand types
         ;; If it does, process the remaining tokens for right side node.
       (let [[remaining right-expr] (parser-fn remaining)]
-        (recur [remaining {:type ast-type :left left-expr :op next-token :right right-expr}]))
+        (recur [remaining (ast-type left-expr next-token right-expr)]))
         ;; If the next token's operand doesn't match, return remaining tokens & the left expr.
       [tokens left-expr])))
 
-(def binary-ast (partial left-right-ast :binary))
+(def binary-ast (partial left-right-ast ->Binary))
 
-(def logical-ast (partial left-right-ast :logical))
+(def logical-ast (partial left-right-ast ->Logical))
 
 (defn- var-stmt-ast
   ([identifier]
    (var-stmt-ast identifier nil))
   ([identifier initializer]
-   {:type :var-stmt :identifier identifier :initializer initializer}))
+   (->VarStmt identifier initializer)))
 
 (defn- var-stmt
   [[identifier second-token & remaining :as tokens]]
@@ -107,7 +111,7 @@
   (loop [[[token & remaining :as tokens] expr] (primary tokens)]
     (if (match? token TokenType/LEFT_PAREN)
       (let [[remaining arguments] (fn-arguments remaining)
-            expr {:type :call :callee expr :paren (first remaining) :arguments arguments}
+            expr (->Call expr (first remaining) arguments)
             remaining (consume remaining TokenType/RIGHT_PAREN "Expect ')' after arguments.")]
         (recur [remaining expr]))
       [tokens expr])))
@@ -116,7 +120,7 @@
   [[token & remaining :as tokens]]
   (if (match? token TokenType/BANG TokenType/MINUS)
     (let [[remaining right] (unary remaining)]
-      [remaining {:type :unary :op token :right right}])
+      [remaining (->Unary token right)])
     (call tokens)))
 
 (defn- factor
@@ -148,8 +152,8 @@
   (let [[[second-token & rest-of-rest :as remaining] left-expr] (logical-or tokens)]
     (if (match? second-token TokenType/EQUAL)
       (let [[rest-of-rest* value-expr] (assignment rest-of-rest)]
-        (if (= (:type left-expr) :variable)
-          [rest-of-rest* {:type :assign :identifier (:identifier left-expr) :value value-expr}]
+        (if (instance? Variable left-expr)
+          [rest-of-rest* (->Assign (:identifier left-expr) value-expr)]
           (throw-error remaining "Invalid assignment target.")))
       [remaining left-expr])))
 
@@ -162,7 +166,7 @@
   (let [[[next-token & remaining :as tokens] expr] (expression tokens)]
     (when-not (match? next-token TokenType/SEMICOLON)
       (throw-error tokens "Expect ';' after value."))
-    [remaining {:type :print :expression expr}]))
+    [remaining (->Print expr)]))
 
 (defn- expression-statement
   ([tokens]
@@ -193,7 +197,7 @@
               [remaining else-branch] (if (match? (first remaining) TokenType/ELSE)
                                         (statement (rest remaining))
                                         [remaining nil])]
-          [remaining {:type :if :condition condition :then then-branch :else else-branch}])
+          [remaining (->If condition then-branch else-branch)])
         (throw-error tokens "Expect ')' after if condition.")))
     (throw-error tokens "Expect '(' after 'if'.")))
 
@@ -203,7 +207,7 @@
     (let [[[right-paren & remaining :as tokens] condition] (expression remaining)]
       (if (match? right-paren TokenType/RIGHT_PAREN)
         (let [[remaining body] (statement remaining)]
-          [remaining {:type :while :condition condition :body body}])
+          [remaining (->While condition body)])
         (throw-error tokens "Expect ')' after condition.")))
     (throw-error tokens "Expect '(' after 'while'.")))
 
@@ -215,19 +219,19 @@
                                     (match? (first remaining) TokenType/VAR) (var-stmt (rest remaining))
                                     :else (expression-statement remaining))
           [remaining condition] (if (match? (first remaining) TokenType/SEMICOLON)
-                                  [(rest remaining) {:type :literal :value true}] ;; Default condition true for infinite loop.
+                                  [(rest remaining) (->Literal true)] ;; Default condition true for infinite loop.
                                   (expression-statement remaining "Expect ')' after loop condition."))
           [remaining increment] (if (match? (first remaining) TokenType/RIGHT_PAREN)
-                                  [remaining {:type :literal :value nil}]
+                                  [remaining (->Literal nil)]
                                   (expression remaining))
           remaining (consume remaining TokenType/RIGHT_PAREN "Expect ')' after for clauses.")
           [remaining body] (statement remaining)
           body (if increment
-                 {:type :block :statements [body increment]}
+                 (->Block [body increment])
                  body)
-          body {:type :while :condition condition :body body}
+          body (->While condition body)
           body (if initializer
-                 {:type :block :statements [initializer body]}
+                 (->Block [initializer body])
                  body)]
       [remaining body])
     (throw-error tokens "Expect '(' after 'for'.)")))
@@ -251,8 +255,7 @@
         tokens (consume tokens TokenType/RIGHT_PAREN "Expect ')' after parameters.")
         tokens (consume tokens TokenType/LEFT_BRACE (str "Expect '{' before " kind " body."))
         [tokens body-expr] (block-statements tokens)]
-    [tokens {:type :function :identifier fn-identifier :params params
-             :body {:type :block :statements body-expr}}]))
+    [tokens (->Fun fn-identifier params (->Block body-expr))]))
 
 (defn func-declare
   "This is a custom feature to support mutual recursion.
@@ -260,7 +263,7 @@
   [[identifier & remaining :as tokens]]
   (if (match? identifier TokenType/IDENTIFIER)
     (if (match? (first remaining) TokenType/SEMICOLON)
-      [(rest remaining) {:type :function :identifier identifier}]
+      [(rest remaining) (->Fun identifier nil nil)]
       (throw-error remaining "Expect ';' after variable declaration."))
     (throw-error tokens "Expect variable name.")))
 
@@ -271,14 +274,14 @@
                         (expression tokens))
         tokens (consume tokens TokenType/SEMICOLON
                         "Expect ';' after return value.")]
-    [tokens {:type :return :keyword return-token :expr expr}]))
+    [tokens (->Return return-token expr)]))
 
 (defn- statement
   [[token & remaining :as tokens]]
   (case (.name (.type token))
     "PRINT" (print-statement remaining)
     "LEFT_BRACE" (let [[tokens statements] (block-statements remaining)]
-                   [tokens {:type :block :statements statements}])
+                   [tokens (->Block statements)])
     "IF" (if-statement remaining)
     "WHILE" (while-statement remaining)
     "FOR" (for-statement remaining)

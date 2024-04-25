@@ -1,8 +1,8 @@
 (ns clojox.native-functions
-  (:require [clojox.callable :refer [ClojoxCallable]]))
+  (:require [clojox.protocols :as protocols]))
 
 (def clock
-  (reify ClojoxCallable
+  (reify protocols/ClojoxCallable
     (call [_ _arguments]
       (/ (System/currentTimeMillis) 1000.0))
     (arity [_]
