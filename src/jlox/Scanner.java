@@ -29,6 +29,7 @@ public class Scanner {
             new SimpleEntry<>("this", TokenType.THIS),
             new SimpleEntry<>("true", TokenType.TRUE),
             new SimpleEntry<>("var", TokenType.VAR),
+            new SimpleEntry<>("declare", TokenType.DECLARE),
             new SimpleEntry<>("while", TokenType.WHILE));
 
     public Scanner(String source) {

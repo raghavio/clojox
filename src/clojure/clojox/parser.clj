@@ -1,9 +1,7 @@
 (ns clojox.parser
   (:import [jlox TokenType Lox]))
 
-(declare expression)
-(declare declaration)
-(declare statement)
+(declare statement declaration expression)
 
 (defn- error
   [[errored-token & tokens] message]
@@ -256,6 +254,16 @@
     [tokens {:type :function :identifier fn-identifier :params params
              :body {:type :block :statements body-expr}}]))
 
+(defn func-declare
+  "This is a custom feature to support mutual recursion.
+  Just like in Clojure, I implemented `declare` for forward declaration."
+  [[identifier & remaining :as tokens]]
+  (if (match? identifier TokenType/IDENTIFIER)
+    (if (match? (first remaining) TokenType/SEMICOLON)
+      [(rest remaining) {:type :function :identifier identifier}]
+      (throw-error remaining "Expect ';' after variable declaration."))
+    (throw-error tokens "Expect variable name.")))
+
 (defn return-statement
   [[return-token & tokens]]
   (let [[tokens expr] (if (match? (first tokens) TokenType/SEMICOLON)
@@ -281,6 +289,7 @@
   [[token & remaining :as tokens]]
   (cond (match? token TokenType/VAR) (var-stmt remaining)
         (match? token TokenType/FUN) (function "function" remaining)
+        (match? token TokenType/DECLARE) (func-declare remaining)
         :else (statement tokens)))
 
 (defn parse

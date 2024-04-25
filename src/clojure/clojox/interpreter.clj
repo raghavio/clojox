@@ -6,7 +6,7 @@
             [clojox.function :refer [->Function]]
             [clojox.evaluate :refer [evaluate]]
             [clojox.native-functions :as native-functions])
-  (:import [jlox TokenType]))
+  (:import [jlox TokenType Return]))
 
 (defn- stringify
   "Convert the intepreted output to string. Remove '.0' from number."
@@ -99,7 +99,6 @@
   [{:keys [statements]} env]
   (loop [statements statements
          env (environment/create env)]
-;;    (println "Env: " env)
     (if (empty? statements)
       [nil (:parent env)]
       (let [[_evaluated-expr env] (evaluate (first statements) env)]
@@ -156,19 +155,13 @@
 
 (defmethod evaluate :function
   [{:keys [identifier] :as fn-ast} env]
-  ;; Function's env should contain itself for recursion to work.
-  ;; To achieve that, we declare an unassigned var. Use the env at this point
-  ;; and then reassign the function's name with record.
-  (let [env (environment/define env identifier nil)
-        fn-record (->Function fn-ast env)]
-    [nil (environment/assign env identifier fn-record)]))
+  [nil (environment/define env identifier (->Function fn-ast env))])
 
 (defmethod evaluate :return
   [{:keys [expr]} env]
   (let [[return-value env] (when expr
                              (evaluate expr env))]
-    (throw
-     (ex-info nil {:return-value return-value :env env}))))
+    (throw (Return. return-value))))
 
 (defn interpret
   [statements]
@@ -178,7 +171,6 @@
       (if (empty? statements)
         nil
         (let [[_evaluated-expr env] (evaluate (first statements) env)]
-          #_(println "Env: " env)
           (recur (rest statements) env))))
     (catch clojure.lang.ExceptionInfo e
       (utils/error (ex-message e) (.line (:token (ex-data e))))

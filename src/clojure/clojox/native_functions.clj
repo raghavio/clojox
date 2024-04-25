@@ -4,7 +4,7 @@
 (def clock
   (reify ClojoxCallable
     (call [_ _arguments]
-      (/ (System/currentTimeMillis) 1000))
+      (/ (System/currentTimeMillis) 1000.0))
     (arity [_]
       0)
     (to-string [_]
