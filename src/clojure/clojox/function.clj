@@ -1,7 +1,7 @@
 (ns clojox.function
   (:require [clojox.environment :as environment]
             [clojox.protocols :as protocols])
-  (:import [jlox ReturnException]))
+  (:import [jlox ReturnException Token]))
 
 (defrecord Function [identifier params body closure]
   protocols/ClojoxCallable
@@ -22,4 +22,4 @@
     (count params))
 
   (to-string [_]
-    (str "<fn " (.lexeme identifier) ">")))
+    (str "<fn " (str (.lexeme ^Token identifier)) ">")))

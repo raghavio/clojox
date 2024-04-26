@@ -2,7 +2,7 @@
   (:require [clojox.interpreter :refer [->Grouping ->Literal ->Unary ->Binary ->Print
                                         ->VarStmt ->Variable ->Assign ->Block ->If
                                         ->Logical ->While ->Call ->Fun ->Return]])
-  (:import [jlox TokenType Lox]
+  (:import [jlox Token TokenType Lox]
            [clojox.interpreter Variable]))
 
 (declare statement declaration expression)
@@ -19,7 +19,7 @@
 (defn- match?
   "Checks if the token matches any of the types"
   [token & types]
-  (some #(= (.type token) %) types))
+  (some #(= (.type ^Token token) %) types))
 
 (defn- consume
   "Consumes the first token if it matches the type, else raises an exception with the error message."
@@ -48,7 +48,7 @@
 (defn- literal-ast
   [[token & remaining-tokens]]
   (let [val-lookup {TokenType/FALSE false TokenType/TRUE true TokenType/NIL nil}
-        value (get val-lookup (.type token) (.literal token))]
+        value (get val-lookup (.type ^Token token) (.literal ^Token token))]
     [remaining-tokens (->Literal value)]))
 
 (defn- primary
@@ -278,7 +278,7 @@
 
 (defn- statement
   [[token & remaining :as tokens]]
-  (case (.name (.type token))
+  (case (.name (.type ^Token token))
     "PRINT" (print-statement remaining)
     "LEFT_BRACE" (let [[tokens statements] (block-statements remaining)]
                    [tokens (->Block statements)])

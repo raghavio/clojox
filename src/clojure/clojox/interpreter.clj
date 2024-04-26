@@ -7,7 +7,7 @@
             [clojox.function :refer [->Function]]
             [clojox.native-functions :as native-functions]
             )
-  (:import [jlox TokenType ReturnException]))
+  (:import [jlox Token TokenType ReturnException]))
 
 
 (defn- stringify
@@ -55,7 +55,7 @@
   protocols/Evaluate
   (evaluate [_ env]
     (let [[right* env] (evaluate right env)
-          result (condp = (.type op)
+          result (condp = (.type ^Token op)
                    TokenType/MINUS (assert-number op - right*)
                    TokenType/BANG (not right*))]
       [result env])))
@@ -65,7 +65,7 @@
   (evaluate [_ env]
     (let [[left* env] (evaluate left env)
           [right* env] (evaluate right env)]
-      [(case (.name (.type op))
+      [(case (.name (.type ^Token op))
          "MINUS" (assert-number op - left* right*)
          "SLASH" (assert-number op / left* right*)
          "STAR" (assert-number op * left* right*)
@@ -129,7 +129,7 @@
   protocols/Evaluate
   (evaluate [_ env]
     (let [[left* env] (evaluate left env)]
-      (if (= (.type op) TokenType/OR)
+      (if (= (.type ^Token op) TokenType/OR)
         (if left* ;; For OR, if left is true, return that else evaluate right expr.
           [left* env]
           (evaluate right env))
@@ -189,6 +189,6 @@
         (let [[_evaluated-expr env] (evaluate (first statements) env)]
           (recur (rest statements) env))))
     (catch clojure.lang.ExceptionInfo e
-      (utils/error (ex-message e) (.line (:token (ex-data e))))
+      (utils/error (ex-message e) (.line ^Token (:token (ex-data e))))
       70 ;; Exit code for runtime error.
       )))
