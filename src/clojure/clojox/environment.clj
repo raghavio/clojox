@@ -1,34 +1,24 @@
 (ns clojox.environment
   (:import [jlox Token]))
 
-(defn create
-  ([parent]
-   (create parent {}))
-  ([parent bindings]
-   {:bindings bindings :parent parent}))
+(defn throw-undefined
+  [identifier]
+  (throw (ex-info (str "Undefined variable '" (.lexeme ^Token identifier) "'.")
+                  {:token identifier})))
 
 (defn lookup
   [env identifier]
-  (if env
-    (if (contains? (:bindings env) (.lexeme ^Token identifier)) ;; value can be nil.
-      @(get (:bindings env) (.lexeme ^Token identifier))
-      (recur (:parent env) identifier))
-    (throw (ex-info (str "Undefined variable '" (.lexeme ^Token identifier) "'.")
-                    {:token identifier}))))
+  (if (contains? env (.lexeme ^Token identifier)) ;; value can be nil.
+    @(get env (.lexeme ^Token identifier))
+    (throw-undefined identifier)))
 
 (defn assign
   [env identifier val]
-  (if (contains? (:bindings env) (.lexeme ^Token identifier))
-    (do (reset! (get-in env [:bindings (.lexeme ^Token identifier)])  val) env)
-    (if (:parent env)
-      (if-let [parent-env (assign (:parent env) identifier val)]
-        (assoc env :parent parent-env)
-        nil)
-      (throw (ex-info (str "Undefined variable '" (.lexeme ^Token identifier) "'.")
-                      {:token identifier})))))
+  (if (contains? env (.lexeme ^Token identifier))
+    (do (reset! (get env (.lexeme ^Token identifier)) val)
+        env)
+    (throw-undefined identifier)))
 
 (defn define
   [env identifier val]
-  (if (contains? (:bindings env) (.lexeme ^Token identifier))
-    (assign env identifier val)
-    (assoc-in env [:bindings (.lexeme ^Token identifier)] (atom val))))
+  (assoc env (.lexeme ^Token identifier) (atom val)))

@@ -10,9 +10,9 @@
           ;; Function's closure should contain itself for recursion to work.
           ;; Cannot do this during func declaration because then it will reference itself infinitely
           closure (environment/define closure identifier this)
-          env (environment/create closure)
+
           env (reduce (fn [env [param arg]]
-                        (environment/define env param arg)) env params-vals)]
+                        (environment/define env param arg)) closure params-vals)]
       (try
         (first (protocols/evaluate body env))
         (catch ReturnException e

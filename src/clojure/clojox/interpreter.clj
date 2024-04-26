@@ -5,10 +5,8 @@
             [clojox.protocols :as protocols :refer [evaluate]]
 
             [clojox.function :refer [->Function]]
-            [clojox.native-functions :as native-functions]
-            )
+            [clojox.native-functions :as native-functions])
   (:import [jlox Token TokenType ReturnException]))
-
 
 (defn- stringify
   "Convert the intepreted output to string. Remove '.0' from number."
@@ -31,15 +29,18 @@
     :else (throw (ex-info "Operands must be two numbers or two strings." {:token operator}))))
 
 (defn- assert-number
+  "Throws exception if operand is not a number."
+  [operator operator-fn left]
+  (when-not (number? left)
+    (throw (ex-info "Operand must be a number." {:token operator})))
+  (operator-fn left))
+
+(defn- assert-numbers
   "Throws exception if operands aren't numbers."
-  [operator operator-fn & operands]
-  (when (not-every? number? operands)
-    (throw (ex-info (str (if (second operands) "Operands" "Operand")
-                         " must be "
-                         (if (second operands) "numbers" "a number")
-                         ".")
-                    {:token operator})))
-  (apply operator-fn operands))
+  [operator operator-fn left right]
+  (when-not (and (number? left) (number? right))
+    (throw (ex-info "Operands must be numbers." {:token operator})))
+  (operator-fn left right))
 
 (defrecord Literal [value]
   protocols/Evaluate
@@ -66,14 +67,14 @@
     (let [[left* env] (evaluate left env)
           [right* env] (evaluate right env)]
       [(case (.name (.type ^Token op))
-         "MINUS" (assert-number op - left* right*)
-         "SLASH" (assert-number op / left* right*)
-         "STAR" (assert-number op * left* right*)
+         "MINUS" (assert-numbers op - left* right*)
+         "SLASH" (assert-numbers op / left* right*)
+         "STAR" (assert-numbers op * left* right*)
          "PLUS" (handle-plus left* right* op)
-         "GREATER" (assert-number op > left* right*)
-         "GREATER_EQUAL" (assert-number op >= left* right*)
-         "LESS" (assert-number op < left* right*)
-         "LESS_EQUAL" (assert-number op <= left* right*)
+         "GREATER" (assert-numbers op > left* right*)
+         "GREATER_EQUAL" (assert-numbers op >= left* right*)
+         "LESS" (assert-numbers op < left* right*)
+         "LESS_EQUAL" (assert-numbers op <= left* right*)
          "BANG_EQUAL" (not= left* right*)
          "EQUAL_EQUAL" (= left* right*))
        env])))
@@ -109,11 +110,11 @@
   protocols/Evaluate
   (evaluate [_ env]
     (loop [statements statements
-           env (environment/create env)]
+           scoped-env env]
       (if (empty? statements)
-        [nil (:parent env)]
-        (let [[_evaluated-expr env] (evaluate (first statements) env)]
-          (recur (rest statements) env))))))
+        [nil env]
+        (let [[_evaluated-expr scoped-env] (evaluate (first statements) scoped-env)]
+          (recur (rest statements) scoped-env))))))
 
 (defrecord If [condition then else]
   protocols/Evaluate
@@ -170,20 +171,27 @@
 (defrecord Fun [identifier params body]
   protocols/Evaluate
   (evaluate [_ env]
-    [nil (environment/define env identifier (->Function identifier params body env))]))
+    ;; If the function was forward declared using the `declare` keyword,
+    ;; we have to reassign it so it gets updated in closures.
+    (let [forward-declared? (when-let [fun (get env (.lexeme ^Token identifier))]
+                              (nil? (:body @fun)))
+          action (if forward-declared?
+                   environment/assign
+                   environment/define)]
+      [nil (action env identifier (->Function identifier params body env))])))
 
 (defrecord Return [_keyword expr]
   protocols/Evaluate
   (evaluate [_ env]
     (let [[return-value _env] (when expr
-                               (evaluate expr env))]
+                                (evaluate expr env))]
       (throw (ReturnException. return-value)))))
 
 (defn interpret
   [statements]
   (try
     (loop [statements statements
-           env (environment/create nil {"clock" (atom native-functions/clock)})]
+           env {"clock" (atom native-functions/clock)}]
       (if (empty? statements)
         nil
         (let [[_evaluated-expr env] (evaluate (first statements) env)]
