@@ -8,8 +8,8 @@
 
 (defn lookup
   [env identifier]
-  (if (contains? env (.lexeme ^Token identifier)) ;; value can be nil.
-    @(get env (.lexeme ^Token identifier))
+  (if-let [val (get env (.lexeme ^Token identifier))]
+    @val
     (throw-undefined identifier)))
 
 (defn assign

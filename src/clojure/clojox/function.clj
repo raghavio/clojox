@@ -5,16 +5,17 @@
 
 (defrecord Function [identifier params body closure]
   protocols/ClojoxCallable
-  (call [this arguments]
-    (let [params-vals (map vector params arguments)
-          ;; Function's closure should contain itself for recursion to work.
-          ;; Cannot do this during func declaration because then it will reference itself infinitely
-          closure (environment/define closure identifier this)
-
-          env (reduce (fn [env [param arg]]
-                        (environment/define env param arg)) closure params-vals)]
+  (call [this args]
+    ;; Function's closure should contain itself for recursion to work.
+    ;; Cannot do this during func declaration because then it will reference itself infinitely
+    (let [closure (environment/define closure identifier this)
+          env (reduce (fn [env i]
+                        (environment/define env (nth params i) (nth args i)))
+                      closure
+                      (range (count params)))]
       (try
-        (first (protocols/evaluate body env))
+        (protocols/evaluate body env)
+        nil ;; Return nil
         (catch ReturnException e
           (.value e)))))
 
