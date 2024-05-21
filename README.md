@@ -1,18 +1,46 @@
 # Clojox
 
-Clojure implementation of the Lox programming language from the book Crafting Interpreters.
+Implementation of the Lox programming language in Clojure.
 
-## License
+Lox is a dynamically typed, high-level scripting language from the book [Crafting Interpreters](https://craftinginterpreters.com/). The book contains two parts where you implement the Lox language in two different methods. In the first part, you implement a tree-walk interpreter using all the niceties of a high-level language like Java, _jlox_. In the second part, you implement a bytecode interpreter in C, _clox_.
 
-Copyright © 2024 FIXME
+This is a tree-walk interpreter which covers the part 1 of the book. I've not added classes and interfaces as I don't care about it as such. It can easily be added if you want to.
 
-This program and the accompanying materials are made available under the
-terms of the Eclipse Public License 2.0 which is available at
-http://www.eclipse.org/legal/epl-2.0.
+## Implementation details
 
-This Source Code may also be made available under the following Secondary
-Licenses when the conditions for such availability set forth in the Eclipse
-Public License, v. 2.0 are satisfied: GNU General Public License as published by
-the Free Software Foundation, either version 2 of the License, or (at your
-option) any later version, with the GNU Classpath Exception which is available
-at https://www.gnu.org/software/classpath/license.html.
+The implementation differs a lot from the _jlox_ implementation in Java. Mine is a lot simpler codewise and doesn't have the caveats which are mentioned in the book. Like, I don't have a resolver step (Chapter 10) because my environment uses immutable persistent data structure and the resolving isn't mandatory since there's no environment leak.
+
+### Scanner
+The Scanner code is written in Java and the implementation is near identical as the book. I initially thought I'd do the book in Java, but after just one chapter I realized life is too short to be willingly writing Java. Also, the visitor pattern scared me.
+
+### Parser
+Parser function receives a vector of `Token` Java class, which includes details like lexeme, token type, and the literal value of the token.
+The implementation of the recursive descent parser is similar to the book. The only change is I pass around the tokens in a functional manner. I rely heavily on destructuring and using `rest` to pass the remaining set of tokens to the next grammar function.
+
+A grammar function returns a vector of length 2, a vector of remaining tokens that are yet to be processed and a `defrecord` describing the AST.
+
+### Interpreter
+
+
+### Environment
+
+
+## Grammar addition
+
+I've added a `declare` keyword to support mutual recursion. Just like how it's done in [Clojure](https://clojuredocs.org/clojure.core/declare).
+
+## Performance
+
+Performance wasn't the main agenda, but I wanted it to be close to _jlox_, since both are running on JVM. It isn't. There's definitely room for improvement. The below fibonacci code is 4.5 times slower than the Java implementation.
+
+```Lox
+fun fib(n) {
+  if (n < 2) return n;
+  return fib(n - 1) + fib(n - 2);
+}
+
+var before = clock();
+print fib(40);
+var after = clock();
+print after - before;
+```
