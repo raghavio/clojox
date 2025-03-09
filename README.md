@@ -73,3 +73,7 @@ print fib(40);
 var after = clock();
 print after - before;
 ```
+
+### Detailed write-up
+
+https://raghavio.com/posts/implementing-lox-in-clojure
